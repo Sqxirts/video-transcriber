@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+*.log
+*.db
+*.sqlite3
+node_modules/
+__pycache__/
+*.pyc
+venv/
+.DS_Store
+backups/
+*.bak
+
+# Transcription working files — downloaded video/audio and course transcripts
+work/
+*.wav
+*.mp4
+*.mkv
+*.webm
