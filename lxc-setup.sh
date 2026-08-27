@@ -17,12 +17,18 @@ echo "$NEW_USER ALL=(ALL) ALL" > "/etc/sudoers.d/$NEW_USER"
 chmod 440 "/etc/sudoers.d/$NEW_USER"
 
 apt-get update
-apt-get install -y openssh-server
+apt-get install -y openssh-server ufw fail2ban
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 systemctl restart ssh
 systemctl enable ssh
+
+ufw allow OpenSSH
+ufw --force enable
+
+systemctl enable fail2ban
+systemctl start fail2ban
 
 apt-get install -y ffmpeg python3-pip python3-venv
 
