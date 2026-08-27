@@ -39,13 +39,18 @@ class VideoSource:
     def _download(self) -> Path:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         out_template = str(self.download_dir / "%(title)s.%(ext)s")
-        subprocess.run(
-            ["yt-dlp", "-f", "bestvideo+bestaudio/best", "-o", out_template, self.target],
+        # --print after_move:filepath reports the actual final path once yt-dlp is
+        # done downloading/merging/moving, instead of us guessing from directory
+        # mtimes — which could grab a thumbnail or .info.json written after the video.
+        result = subprocess.run(
+            ["yt-dlp", "-f", "bestvideo+bestaudio/best", "-o", out_template,
+             "--print", "after_move:filepath", self.target],
             check=True,
+            capture_output=True,
+            text=True,
         )
-        # yt-dlp names the file after the video title; grab the newest file we just wrote
-        newest = max(self.download_dir.glob("*"), key=lambda p: p.stat().st_mtime)
-        return newest
+        filepath = result.stdout.strip().splitlines()[-1]
+        return Path(filepath)
 
 
 class AudioExtractor:
