@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-NEW_USER="claude"
+# Service user for transcription. No sudo: nothing in the pipeline needs root.
+NEW_USER="transcriber"
 PUBKEY="ssh-ed25519 AAAA...your_public_key_here... your-key-comment"
 
 adduser --disabled-password --gecos "" "$NEW_USER"
-usermod -aG sudo "$NEW_USER"
 
 mkdir -p "/home/$NEW_USER/.ssh"
 echo "$PUBKEY" > "/home/$NEW_USER/.ssh/authorized_keys"
@@ -13,16 +13,27 @@ chmod 700 "/home/$NEW_USER/.ssh"
 chmod 600 "/home/$NEW_USER/.ssh/authorized_keys"
 chown -R "$NEW_USER:$NEW_USER" "/home/$NEW_USER/.ssh"
 
-echo "$NEW_USER ALL=(ALL) ALL" > "/etc/sudoers.d/$NEW_USER"
-chmod 440 "/etc/sudoers.d/$NEW_USER"
-
 apt-get update
-apt-get install -y openssh-server
-sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+apt-get install -y openssh-server ufw fail2ban
+
+# Drop-in instead of editing sshd_config, so package updates can't overwrite it.
+# The file name sorts first, and sshd keeps the first value it reads.
+cat > /etc/ssh/sshd_config.d/10-hardening.conf <<'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+EOF
+
+# Refuse to restart on a broken config, or SSH won't come back.
+sshd -t
 systemctl restart ssh
 systemctl enable ssh
+
+ufw allow OpenSSH
+ufw --force enable
+
+systemctl enable fail2ban
+systemctl start fail2ban
 
 apt-get install -y ffmpeg python3-pip python3-venv
 

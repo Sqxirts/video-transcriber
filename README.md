@@ -1,38 +1,28 @@
 # Video Transcriber
 
-## What it is
+Turns video and audio into text, entirely on my own hardware. Give it a file or a URL; it downloads with `yt-dlp` if needed and transcribes with `faster-whisper`. I built it to turn long course videos into searchable study notes without uploading them to a third-party service.
 
-A Python tool that downloads video/audio (via `yt-dlp`) and transcribes it locally using `faster-whisper`, running in a dedicated, hardened Proxmox LXC container.
+## What's in the repo
 
-## Why I built it
+- `transcribe.py`: the pipeline. Resolves a file or URL, runs the speech model, writes a plain-text transcript, and optionally an `.srt` subtitle file.
+- `lxc-setup.sh`: sets up a fresh Ubuntu container to run it.
 
-Built this to turn long-form cybersecurity and networking course videos into searchable text notes for studying (CompTIA Network+/Security+, capstone prep, etc.) without relying on a third-party transcription API or uploading course content to the cloud.
+## How the container is set up
 
-## Tech stack
+- **A dedicated user with no admin rights.** Transcription doesn't need root, so the `transcriber` user doesn't get sudo.
+- **SSH by key only.** Password login and root login are turned off.
+- **SSH settings go in a separate drop-in file** (`/etc/ssh/sshd_config.d/10-hardening.conf`), and the script checks the config with `sshd -t` before restarting SSH, so a typo can't lock you out.
+- **Firewall on by default.** Only SSH is allowed in (ufw), and repeated failed logins get the address banned (fail2ban).
+- **Nothing leaves the machine.** The model runs locally; the only network traffic is the optional download.
 
-- Python 3.12, `faster-whisper`, `yt-dlp`, `ffmpeg`
-- Proxmox LXC container (Ubuntu 24.04), provisioned by a dedicated setup script
-- Dedicated non-root user with SSH key-only access
+## Run it
 
-## What it demonstrates
-
-- **Least-privilege provisioning**: `lxc-setup.sh` creates a dedicated service user, disables password auth and root login over SSH, and restricts access to a single authorized key.
-- **Container isolation**: runs in its own LXC, separate from other homelab services, with no unnecessary network exposure.
-- **Local-first processing**: transcription happens entirely on-box — no third-party API calls, no data leaving the homelab.
-- **Reproducible provisioning**: the entire container setup (user creation, SSH hardening, dependency installation) is captured in one idempotent-ish shell script.
-
-## Setup
-
-1. Provision a fresh LXC container and run `lxc-setup.sh` as root (edit `PUBKEY` first to use your own key):
+1. On a fresh Ubuntu 24.04 container, edit `PUBKEY` in `lxc-setup.sh` to your public key, then run it as root:
    ```bash
    bash lxc-setup.sh
    ```
-2. SSH in as the new user, activate the venv, and run:
+2. SSH in as `transcriber`, then:
    ```bash
    source ~/venv/bin/activate
-   python transcribe.py <video-url-or-path>
+   python transcribe.py <file-or-url> [--model small] [--srt]
    ```
-
-## Screenshots / diagrams
-
-None yet.
