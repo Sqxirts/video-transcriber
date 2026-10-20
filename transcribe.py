@@ -1,21 +1,32 @@
 """
-Video -> transcript pipeline. Runs inside the video-transcriber container on Nexus.
+Video -> transcript pipeline. One script for both places it runs: the CPU-only
+LXC container, and WSL2 on a desktop with an NVIDIA GPU (launch via run-gpu.sh
+there so the CUDA libraries are found). Device, precision and default model all
+follow whether a usable GPU is present.
 
 Usage:
-    python transcribe.py <path-or-url> [--model small] [--output-dir /work/output]
+    python transcribe.py <path-or-url> [--model small] [--device auto] [--srt]
 
-Accepts a local file path (mounted under /work/input) or a YouTube/web URL
-(downloaded via yt-dlp first). Always writes a plain-text transcript;
-pass --srt to also get timestamped subtitles.
+Accepts a local file path or a URL (fetched with yt-dlp). Always writes a plain-text
+transcript; pass --srt for timestamped subtitles.
 """
 
 import argparse
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from faster_whisper import WhisperModel
+
+# Batched inference lands a large speedup on GPU but arrived in faster-whisper 1.1.
+# Import defensively so the script still runs against older builds.
+try:
+    from faster_whisper import BatchedInferencePipeline
+    HAVE_BATCHED = True
+except ImportError:
+    HAVE_BATCHED = False
 
 
 class VideoSource:
@@ -76,13 +87,58 @@ class AudioExtractor:
 
 
 class Transcriber:
-    """Wraps faster-whisper. Model downloads once and is cached in the mounted volume."""
+    """
+    Wraps faster-whisper.
 
-    def __init__(self, model_size: str = "small", device: str = "cpu", compute_type: str = "int8"):
-        self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    device="auto" lets ctranslate2 pick CUDA when it's usable and fall back to CPU
+    otherwise, so the same script works if you run it somewhere without a GPU.
+    compute_type follows the device: float16 is the natural fit for a 3080, while
+    int8 is what you want when this lands on a CPU.
+    """
+
+    def __init__(self, model_size: str | None = None, device: str = "auto",
+                 compute_type: str | None = None, batch_size: int = 8):
+        resolved_device = self._resolve_device(device)
+        # large-v3 is affordable on a GPU but crawls on CPU, so the default follows the device.
+        if model_size is None:
+            model_size = "large-v3" if resolved_device == "cuda" else "small"
+        if compute_type is None:
+            compute_type = "float16" if resolved_device == "cuda" else "int8"
+
+        self.device = resolved_device
+        self.compute_type = compute_type
+        self.batch_size = batch_size
+
+        print(f"Loading {model_size} on {resolved_device} ({compute_type}) ...", file=sys.stderr)
+        self.model = WhisperModel(model_size, device=resolved_device, compute_type=compute_type)
+
+        # Batching only helps on GPU; on CPU it mostly just adds memory pressure.
+        self.batched = None
+        if HAVE_BATCHED and resolved_device == "cuda":
+            self.batched = BatchedInferencePipeline(model=self.model)
+
+    @staticmethod
+    def _resolve_device(device: str) -> str:
+        if device != "auto":
+            return device
+        # ctranslate2 reports how many CUDA devices it can actually use, which is a
+        # better test than checking for a driver — WSL can see nvidia-smi but still
+        # fail to load the CUDA runtime if the libs are missing.
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                return "cuda"
+        except Exception:
+            pass
+        return "cpu"
 
     def transcribe(self, audio_path: Path):
-        segments, info = self.model.transcribe(str(audio_path), beam_size=5)
+        if self.batched is not None:
+            segments, info = self.batched.transcribe(
+                str(audio_path), beam_size=5, batch_size=self.batch_size
+            )
+        else:
+            segments, info = self.model.transcribe(str(audio_path), beam_size=5)
         return list(segments), info
 
 
@@ -111,10 +167,14 @@ class TranscriptWriter:
 class TranscriptionPipeline:
     """Ties source resolution -> audio extraction -> transcription -> output together."""
 
-    def __init__(self, model_size: str, output_dir: Path, work_dir: Path):
+    def __init__(self, model_size: str | None, output_dir: Path, work_dir: Path,
+                 device: str = "auto", compute_type: str | None = None, batch_size: int = 8):
         self.output_dir = output_dir
         self.work_dir = work_dir
-        self.transcriber = Transcriber(model_size=model_size)
+        self.transcriber = Transcriber(
+            model_size=model_size, device=device,
+            compute_type=compute_type, batch_size=batch_size,
+        )
 
     def run(self, target: str, want_srt: bool) -> Path:
         source = VideoSource(target, download_dir=self.work_dir / "downloads")
@@ -124,8 +184,16 @@ class TranscriptionPipeline:
         audio_path = extractor.extract(video_path)
 
         print(f"Transcribing {video_path.name} ...", file=sys.stderr)
+        started = time.monotonic()
         segments, info = self.transcriber.transcribe(audio_path)
+        elapsed = time.monotonic() - started
+
         print(f"Detected language: {info.language} (p={info.language_probability:.2f})", file=sys.stderr)
+        # Realtime factor is the number worth watching: how many seconds of audio
+        # got transcribed per second of wall clock.
+        if info.duration:
+            print(f"Took {elapsed:.1f}s for {info.duration:.1f}s of audio "
+                  f"({info.duration / elapsed:.1f}x realtime)", file=sys.stderr)
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         text_path = self.output_dir / f"{video_path.stem}.txt"
@@ -141,8 +209,16 @@ class TranscriptionPipeline:
 def main():
     parser = argparse.ArgumentParser(description="Transcribe a local video or URL to text.")
     parser.add_argument("target", help="Local file path or video URL")
-    parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium", "large-v3"],
-                         help="Whisper model size — bigger = more accurate, slower on CPU (default: small)")
+    parser.add_argument("--model", default=None,
+                        choices=["tiny", "base", "small", "medium", "large-v3"],
+                        help="Whisper model size (default: large-v3 on GPU, small on CPU)")
+    parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"],
+                        help="Where to run (default: auto-detect CUDA)")
+    parser.add_argument("--compute-type", default=None,
+                        help="Override precision, e.g. float16, int8_float16, int8. "
+                             "Defaults to float16 on GPU and int8 on CPU.")
+    parser.add_argument("--batch-size", type=int, default=8,
+                        help="Batched inference size on GPU (default: 8). Lower it if VRAM is tight.")
     parser.add_argument("--output-dir", default="output", help="Where to write the transcript")
     parser.add_argument("--work-dir", default="tmp", help="Scratch space for downloads/audio")
     parser.add_argument("--srt", action="store_true", help="Also write a timestamped .srt file")
@@ -152,6 +228,9 @@ def main():
         model_size=args.model,
         output_dir=Path(args.output_dir),
         work_dir=Path(args.work_dir),
+        device=args.device,
+        compute_type=args.compute_type,
+        batch_size=args.batch_size,
     )
     out_path = pipeline.run(args.target, want_srt=args.srt)
     print(f"Transcript written to: {out_path}")
