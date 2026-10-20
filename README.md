@@ -4,7 +4,9 @@ Turns video and audio into text, entirely on my own hardware. Give it a file or 
 
 ## What's in the repo
 
-- `transcribe.py`: the pipeline. Resolves a file or URL, runs the speech model, writes a plain-text transcript, and optionally an `.srt` subtitle file.
+- `transcribe.py`: the pipeline. Resolves a file or URL, runs the speech model, writes a plain-text transcript, and optionally an `.srt` subtitle file. Uses an NVIDIA GPU when one is usable and falls back to CPU otherwise.
+- `run-gpu.sh`: GPU launcher. The CUDA libraries pip installs live inside the virtual environment, where the loader doesn't look, so this script adds them to the path first.
+- `extract-pptx.py`: pulls slide text and speaker notes out of a PowerPoint file with only the standard library, to pair lecture slides with their transcripts.
 - `lxc-setup.sh`: sets up a fresh Ubuntu container to run it.
 
 ## How the container is set up
@@ -26,3 +28,5 @@ Turns video and audio into text, entirely on my own hardware. Give it a file or 
    source ~/venv/bin/activate
    python transcribe.py <file-or-url> [--model small] [--srt]
    ```
+
+**On a GPU (WSL2 or Linux with an NVIDIA card):** create a `venv` next to the scripts, `pip install faster-whisper yt-dlp nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-nvrtc-cu12` (the launcher expects Python 3.12's venv layout), then run `./run-gpu.sh <file-or-url>`. It defaults to the `large-v3` model there; on CPU the default is `small`, because large models are far slower without a GPU.

@@ -1,0 +1,17 @@
+# Everything in this repo runs on Linux -- the LXC container on Nexus and WSL2
+# on the workstation -- so the working tree must use LF, not just the blobs.
+#
+# Without this, core.autocrlf=true rewrites shell scripts with CRLF on checkout.
+# The shebang then reads "#!/usr/bin/env bash\r", and the kernel looks for an
+# interpreter literally named "bash\r":
+#
+#     bad interpreter: No such file or directory
+#
+# The failure only appears after a clone or checkout on Windows, so it survives
+# local testing and breaks for the next person.
+
+* text=auto eol=lf
+
+*.sh  text eol=lf
+*.py  text eol=lf
+*.md  text eol=lf
