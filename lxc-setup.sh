@@ -14,7 +14,7 @@ chmod 600 "/home/$NEW_USER/.ssh/authorized_keys"
 chown -R "$NEW_USER:$NEW_USER" "/home/$NEW_USER/.ssh"
 
 apt-get update
-apt-get install -y openssh-server
+apt-get install -y openssh-server ufw fail2ban
 
 # Drop-in instead of editing sshd_config, so package updates can't overwrite it.
 # The file name sorts first, and sshd keeps the first value it reads.
@@ -28,6 +28,12 @@ EOF
 sshd -t
 systemctl restart ssh
 systemctl enable ssh
+
+ufw allow OpenSSH
+ufw --force enable
+
+systemctl enable fail2ban
+systemctl start fail2ban
 
 apt-get install -y ffmpeg python3-pip python3-venv
 

@@ -12,6 +12,7 @@ Turns video and audio into text, entirely on my own hardware. Give it a file or 
 - **A dedicated user with no admin rights.** Transcription doesn't need root, so the `transcriber` user doesn't get sudo.
 - **SSH by key only.** Password login and root login are turned off.
 - **SSH settings go in a separate drop-in file** (`/etc/ssh/sshd_config.d/10-hardening.conf`), and the script checks the config with `sshd -t` before restarting SSH, so a typo can't lock you out.
+- **Firewall on by default.** Only SSH is allowed in (ufw), and repeated failed logins get the address banned (fail2ban).
 - **Nothing leaves the machine.** The model runs locally; the only network traffic is the optional download.
 
 ## Run it
