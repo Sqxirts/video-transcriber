@@ -29,4 +29,4 @@ Turns video and audio into text, entirely on my own hardware. Give it a file or 
    python transcribe.py <file-or-url> [--model small] [--srt]
    ```
 
-**On a GPU (WSL2 or Linux with an NVIDIA card):** create a `venv` next to the scripts, `pip install faster-whisper yt-dlp nvidia-cublas-cu12 nvidia-cudnn-cu12`, then run `./run-gpu.sh <file-or-url>`. It defaults to the `large-v3` model there; on CPU the default is `small`, because large models are far slower without a GPU.
+**On a GPU (WSL2 or Linux with an NVIDIA card):** create a `venv` next to the scripts, `pip install faster-whisper yt-dlp nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-nvrtc-cu12` (the launcher expects Python 3.12's venv layout), then run `./run-gpu.sh <file-or-url>`. It defaults to the `large-v3` model there; on CPU the default is `small`, because large models are far slower without a GPU.
